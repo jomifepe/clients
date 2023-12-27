@@ -75,7 +75,6 @@ jobs:
 
 
   cli:
-    if: false
     name: Build CLI ${{ matrix.os }}
     strategy:
       matrix:
@@ -172,7 +171,6 @@ jobs:
       - name: Configure binfmt with QEMU User Emulation
         run: |
           sudo apt install binfmt-support qemu-user-static
-          update-binfmts --display
 
       - name: Set up Node
         uses: actions/setup-node@64ed1c7eab4cce3362f8c340dee64e5eaeef8f7c # v3.6.0
@@ -223,7 +221,6 @@ jobs:
           if-no-files-found: error
 
   cli-windows:
-    if: false
     name: Build CLI Windows
     runs-on: windows-2019
     needs:
@@ -369,7 +366,6 @@ jobs:
           if-no-files-found: error
 
   snap:
-    if: false
     name: Build Snap
     runs-on: ubuntu-22.04
     needs: [setup, cli]
