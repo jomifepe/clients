@@ -187,7 +187,9 @@ jobs:
       - name: Download argon2-node binary for arm64
         working-directory: ./
         run: |
-          curl -L -o argon2.tar.gz https://github.com/ranisalt/node-argon2/releases/download/v0.31.2/argon2-v0.31.2-napi-v3-linux-arm64-glibc.tar.gz
+          ARGON2_VERSION=$(grep '"argon2":' apps/cli/package.json | sed -e 's/.*"argon2": "\(.*\)",/\1/g')
+          echo "ARGON2_VERSION: ${ARGON2_VERSION}"
+          curl -L -o argon2.tar.gz "https://github.com/ranisalt/node-argon2/releases/download/v${ARGON2_VERSION}/argon2-v${ARGON2_VERSION}-napi-v3-linux-arm64-glibc.tar.gz"
           tar xvzf argon2.tar.gz
           mv napi-v3/argon2.node node_modules/argon2/lib/binding/napi-v3/argon2.node
           rm -rf argon2.tar.gz napi-v3
