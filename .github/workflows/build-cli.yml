@@ -132,8 +132,11 @@ jobs:
           if-no-files-found: error
 
   cli-arm64:
-    name: Build CLI Linux arm64
-    runs-on: ubuntu-22.04
+    name: Build ${{ matrix.os }} arm64 CLI
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, macos-11]
+    runs-on: ${{ matrix.os }}
     needs:
       - setup
     env:
@@ -153,6 +156,7 @@ jobs:
             awk '{print tolower($0)}')" >> $GITHUB_ENV
 
       - name: Configure binfmt with QEMU User Emulation
+        if: startsWith(matrix.os, 'ubuntu')
         run: |
           sudo apt install binfmt-support qemu-user-static
 
