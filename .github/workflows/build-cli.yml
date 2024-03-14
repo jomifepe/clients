@@ -64,7 +64,7 @@ jobs:
           PKG_VERSION=$(jq -r .version package.json)
           echo "package_version=$PKG_VERSION" >> $GITHUB_OUTPUT
 
-  cli-windows:
+  build-cli-windows:
     name: Build CLI Windows
     runs-on: windows-2022
     needs:
@@ -198,7 +198,7 @@ jobs:
           path: apps/cli/build
           if-no-files-found: error
 
-  cli-linux-macos:
+  build-cli-linux-macos:
     name: Build CLI ${{ matrix.os }} (${{ matrix.arch }})
     strategy:
       matrix:
@@ -279,7 +279,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     needs:
       - setup
-      - cli
+      - build-cli-linux-macos
     env:
       _PACKAGE_VERSION: ${{ needs.setup.outputs.package_version }}
     steps:
@@ -316,7 +316,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     needs:
       - setup
-      - cli
+      - build-cli-windows
     env:
       _PACKAGE_VERSION: ${{ needs.setup.outputs.package_version }}
     steps:
