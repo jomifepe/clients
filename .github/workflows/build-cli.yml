@@ -165,6 +165,17 @@ jobs:
         shell: cmd
         run: 7z a ./dist/bw-windows-%_PACKAGE_VERSION%.zip ./dist/windows/bw.exe
 
+      - name: Version Test
+        run: |
+          dir ./dist/
+          Expand-Archive -Path "./dist/bw-windows-${env:_PACKAGE_VERSION}.zip" -DestinationPath "./test/windows"
+          $testVersion = Invoke-Expression '& ./test/windows/bw.exe -v'
+          echo "version: $env:_PACKAGE_VERSION"
+          echo "testVersion: $testVersion"
+          if($testVersion -ne $env:_PACKAGE_VERSION) {
+            Throw "Version test failed."
+          }
+
       - name: Create checksums Windows
         run: |
           checksum -f="./dist/bw-windows-${env:_PACKAGE_VERSION}.zip" `
