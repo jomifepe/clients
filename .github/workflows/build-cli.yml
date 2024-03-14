@@ -141,8 +141,11 @@ jobs:
     name: Test CLI ${{ matrix.os }} (${{ matrix.arch }})
     strategy:
       matrix:
-        arch: [x64, arm64]
-        os: [ubuntu-20.04, macos-14]
+        os:
+          - os: ubuntu-20.04
+            arch: [x64]
+          - os: macos-14
+            arch: [x64, arm64]
     runs-on: ${{ matrix.os }}
     needs:
       - setup
