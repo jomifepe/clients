@@ -1,6 +1,7 @@
 import { DatePipe } from "@angular/common";
 import { Component } from "@angular/core";
 
+import { CollectionService } from "@bitwarden/admin-console/common";
 import { ApiService } from "@bitwarden/common/abstractions/api.service";
 import { AuditService } from "@bitwarden/common/abstractions/audit.service";
 import { EventCollectionService } from "@bitwarden/common/abstractions/event/event-collection.service";
@@ -14,8 +15,8 @@ import { LogService } from "@bitwarden/common/platform/abstractions/log.service"
 import { MessagingService } from "@bitwarden/common/platform/abstractions/messaging.service";
 import { PlatformUtilsService } from "@bitwarden/common/platform/abstractions/platform-utils.service";
 import { SendApiService } from "@bitwarden/common/tools/send/services/send-api.service.abstraction";
+import { UserId } from "@bitwarden/common/types/guid";
 import { CipherService } from "@bitwarden/common/vault/abstractions/cipher.service";
-import { CollectionService } from "@bitwarden/common/vault/abstractions/collection.service";
 import { FolderService } from "@bitwarden/common/vault/abstractions/folder/folder.service.abstraction";
 import { TotpService } from "@bitwarden/common/vault/abstractions/totp.service";
 import { CipherData } from "@bitwarden/common/vault/models/data/cipher.data";
@@ -82,7 +83,7 @@ export class AddEditComponent extends BaseAddEditComponent {
   }
 
   protected loadCollections() {
-    if (!this.organization.canEditAllCiphers(this.restrictProviderAccess)) {
+    if (!this.organization.canEditAllCiphers) {
       return super.loadCollections();
     }
     return Promise.resolve(this.collections);
@@ -92,10 +93,7 @@ export class AddEditComponent extends BaseAddEditComponent {
     // Calling loadCipher first to assess if the cipher is unassigned. If null use apiService getCipherAdmin
     const firstCipherCheck = await super.loadCipher();
 
-    if (
-      !this.organization.canEditAllCiphers(this.restrictProviderAccess) &&
-      firstCipherCheck != null
-    ) {
+    if (!this.organization.canEditAllCiphers && firstCipherCheck != null) {
       return firstCipherCheck;
     }
     const response = await this.apiService.getCipherAdmin(this.cipherId);
@@ -107,15 +105,16 @@ export class AddEditComponent extends BaseAddEditComponent {
     return cipher;
   }
 
-  protected encryptCipher() {
-    if (!this.organization.canEditAllCiphers(this.restrictProviderAccess)) {
-      return super.encryptCipher();
+  protected encryptCipher(userId: UserId) {
+    if (!this.organization.canEditAllCiphers) {
+      return super.encryptCipher(userId);
     }
-    return this.cipherService.encrypt(this.cipher, null, null, this.originalCipher);
+
+    return this.cipherService.encrypt(this.cipher, userId, null, null, this.originalCipher);
   }
 
   protected async deleteCipher() {
-    if (!this.organization.canEditAllCiphers(this.restrictProviderAccess)) {
+    if (!this.organization.canEditAllCiphers) {
       return super.deleteCipher();
     }
     return this.cipher.isDeleted
