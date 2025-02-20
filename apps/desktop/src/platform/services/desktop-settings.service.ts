@@ -66,14 +66,22 @@ const BROWSER_INTEGRATION_FINGERPRINT_ENABLED = new KeyDefinition<boolean>(
   },
 );
 
+const SSH_AGENT_ENABLED = new KeyDefinition<boolean>(DESKTOP_SETTINGS_DISK, "sshAgentEnabled", {
+  deserializer: (b) => b,
+});
+
 const MINIMIZE_ON_COPY = new UserKeyDefinition<boolean>(DESKTOP_SETTINGS_DISK, "minimizeOnCopy", {
   deserializer: (b) => b,
   clearOn: [], // User setting, no need to clear
 });
 
-const ALLOW_SCREENSHOTS = new KeyDefinition<boolean>(DESKTOP_SETTINGS_DISK, "allowScreenshots", {
-  deserializer: (b) => b,
-});
+const PREVENT_SCREENSHOTS = new KeyDefinition<boolean>(
+  DESKTOP_SETTINGS_DISK,
+  "preventScreenshots",
+  {
+    deserializer: (b) => b,
+  },
+);
 
 /**
  * Various settings for controlling application behavior specific to the desktop client.
@@ -143,12 +151,16 @@ export class DesktopSettingsService {
   browserIntegrationFingerprintEnabled$ =
     this.browserIntegrationFingerprintEnabledState.state$.pipe(map(Boolean));
 
-  private readonly allowScreenshotState = this.stateProvider.getGlobal(ALLOW_SCREENSHOTS);
+  private readonly sshAgentEnabledState = this.stateProvider.getGlobal(SSH_AGENT_ENABLED);
+
+  sshAgentEnabled$ = this.sshAgentEnabledState.state$.pipe(map(Boolean));
+
+  private readonly preventScreenshotState = this.stateProvider.getGlobal(PREVENT_SCREENSHOTS);
 
   /**
    * The application setting for whether or not to allow screenshots of the app.
    */
-  allowScreenshots$ = this.allowScreenshotState.state$.pipe(map(Boolean));
+  preventScreenshots$ = this.preventScreenshotState.state$.pipe(map(Boolean));
 
   private readonly minimizeOnCopyState = this.stateProvider.getActive(MINIMIZE_ON_COPY);
 
@@ -258,6 +270,13 @@ export class DesktopSettingsService {
   }
 
   /**
+   * Sets a setting for whether or not the SSH agent is enabled.
+   */
+  async setSshAgentEnabled(value: boolean) {
+    await this.sshAgentEnabledState.update(() => value);
+  }
+
+  /**
    * Sets the minimize on copy value for the current user.
    * @param value `true` if the application should minimize when a value is copied,
    * `false` if it should not.
@@ -271,7 +290,7 @@ export class DesktopSettingsService {
    * Sets the setting for whether or not the screenshot protection is enabled.
    * @param value `true` if the screenshot protection is enabled, `false` if it is not.
    */
-  async setAllowScreenshots(value: boolean) {
-    await this.allowScreenshotState.update(() => value);
+  async setPreventScreenshots(value: boolean) {
+    await this.preventScreenshotState.update(() => value);
   }
 }

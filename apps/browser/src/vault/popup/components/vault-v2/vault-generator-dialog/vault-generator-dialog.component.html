@@ -1,4 +1,4 @@
-<popup-page @slideIn>
+<popup-page>
   <popup-header
     slot="header"
     [backAction]="close"
@@ -8,6 +8,7 @@
 
   <vault-cipher-form-generator
     [type]="params.type"
+    [uri]="uri"
     (valueGenerated)="onValueGenerated($event)"
   ></vault-cipher-form-generator>
 

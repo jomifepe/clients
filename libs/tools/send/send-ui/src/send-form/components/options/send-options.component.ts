@@ -1,23 +1,33 @@
+// FIXME: Update this file to be type safe and remove this and next line
+// @ts-strict-ignore
 import { CommonModule } from "@angular/common";
 import { Component, Input, OnInit } from "@angular/core";
 import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
 import { FormBuilder, ReactiveFormsModule } from "@angular/forms";
-import { firstValueFrom, map } from "rxjs";
+import { BehaviorSubject, firstValueFrom, map, switchMap } from "rxjs";
 
 import { JslibModule } from "@bitwarden/angular/jslib.module";
 import { PolicyService } from "@bitwarden/common/admin-console/abstractions/policy/policy.service.abstraction";
 import { PolicyType } from "@bitwarden/common/admin-console/enums";
+import { AccountService } from "@bitwarden/common/auth/abstractions/account.service";
+import { getUserId } from "@bitwarden/common/auth/services/account.service";
+import { I18nService } from "@bitwarden/common/platform/abstractions/i18n.service";
 import { SendView } from "@bitwarden/common/tools/send/models/view/send.view";
+import { SendApiService } from "@bitwarden/common/tools/send/services/send-api.service.abstraction";
 import {
+  AsyncActionsModule,
+  ButtonModule,
   CardComponent,
   CheckboxModule,
+  DialogService,
   FormFieldModule,
   IconButtonModule,
   SectionComponent,
   SectionHeaderComponent,
+  ToastService,
   TypographyModule,
 } from "@bitwarden/components";
-import { CredentialGeneratorService, Generators } from "@bitwarden/generator-core";
+import { CredentialGeneratorService, GenerateRequest, Generators } from "@bitwarden/generator-core";
 
 import { SendFormConfig } from "../../abstractions/send-form-config.service";
 import { SendFormContainer } from "../../send-form-container";
@@ -27,16 +37,18 @@ import { SendFormContainer } from "../../send-form-container";
   templateUrl: "./send-options.component.html",
   standalone: true,
   imports: [
+    AsyncActionsModule,
+    ButtonModule,
+    CardComponent,
+    CheckboxModule,
+    CommonModule,
+    FormFieldModule,
+    IconButtonModule,
+    JslibModule,
+    ReactiveFormsModule,
     SectionComponent,
     SectionHeaderComponent,
     TypographyModule,
-    JslibModule,
-    CardComponent,
-    FormFieldModule,
-    ReactiveFormsModule,
-    IconButtonModule,
-    CheckboxModule,
-    CommonModule,
   ],
 })
 export class SendOptionsComponent implements OnInit {
@@ -45,6 +57,7 @@ export class SendOptionsComponent implements OnInit {
   @Input()
   originalSendView: SendView;
   disableHideEmail = false;
+  passwordRemoved = false;
   sendOptionsForm = this.formBuilder.group({
     maxAccessCount: [null as number],
     accessCount: [null as number],
@@ -54,31 +67,38 @@ export class SendOptionsComponent implements OnInit {
   });
 
   get hasPassword(): boolean {
-    return (
-      this.sendOptionsForm.value.password !== null && this.sendOptionsForm.value.password !== ""
-    );
+    return this.originalSendView && this.originalSendView.password !== null;
   }
 
   get shouldShowCount(): boolean {
     return this.config.mode === "edit" && this.sendOptionsForm.value.maxAccessCount !== null;
   }
 
-  get viewsLeft(): number {
-    return this.sendOptionsForm.value.maxAccessCount
-      ? this.sendOptionsForm.value.maxAccessCount - this.sendOptionsForm.value.accessCount
-      : 0;
+  get viewsLeft() {
+    return String(
+      this.sendOptionsForm.value.maxAccessCount
+        ? this.sendOptionsForm.value.maxAccessCount - this.sendOptionsForm.value.accessCount
+        : 0,
+    );
   }
 
   constructor(
     private sendFormContainer: SendFormContainer,
+    private dialogService: DialogService,
+    private sendApiService: SendApiService,
     private formBuilder: FormBuilder,
     private policyService: PolicyService,
+    private i18nService: I18nService,
+    private toastService: ToastService,
     private generatorService: CredentialGeneratorService,
+    private accountService: AccountService,
   ) {
     this.sendFormContainer.registerChildForm("sendOptionsForm", this.sendOptionsForm);
-    this.policyService
-      .getAll$(PolicyType.SendOptions)
+
+    this.accountService.activeAccount$
       .pipe(
+        getUserId,
+        switchMap((userId) => this.policyService.getAll$(PolicyType.SendOptions, userId)),
         map((policies) => policies?.some((p) => p.data.disableHideEmail)),
         takeUntilDestroyed(),
       )
@@ -101,8 +121,9 @@ export class SendOptionsComponent implements OnInit {
   }
 
   generatePassword = async () => {
+    const on$ = new BehaviorSubject<GenerateRequest>({ source: "send" });
     const generatedCredential = await firstValueFrom(
-      this.generatorService.generate$(Generators.password),
+      this.generatorService.generate$(Generators.password, { on$ }),
     );
 
     this.sendOptionsForm.patchValue({
@@ -110,16 +131,51 @@ export class SendOptionsComponent implements OnInit {
     });
   };
 
+  removePassword = async () => {
+    if (!this.originalSendView || !this.originalSendView.password) {
+      return;
+    }
+    const confirmed = await this.dialogService.openSimpleDialog({
+      title: { key: "removePassword" },
+      content: { key: "removePasswordConfirmation" },
+      type: "warning",
+    });
+
+    if (!confirmed) {
+      return false;
+    }
+
+    this.passwordRemoved = true;
+
+    await this.sendApiService.removePassword(this.originalSendView.id);
+
+    this.toastService.showToast({
+      variant: "success",
+      title: null,
+      message: this.i18nService.t("removedPassword"),
+    });
+
+    this.originalSendView.password = null;
+    this.sendOptionsForm.patchValue({
+      password: null,
+    });
+    this.sendOptionsForm.get("password")?.enable();
+  };
+
   ngOnInit() {
     if (this.sendFormContainer.originalSendView) {
       this.sendOptionsForm.patchValue({
         maxAccessCount: this.sendFormContainer.originalSendView.maxAccessCount,
         accessCount: this.sendFormContainer.originalSendView.accessCount,
-        password: null,
+        password: this.hasPassword ? "************" : null, // 12 masked characters as a placeholder
         hideEmail: this.sendFormContainer.originalSendView.hideEmail,
         notes: this.sendFormContainer.originalSendView.notes,
       });
     }
+    if (this.hasPassword) {
+      this.sendOptionsForm.get("password")?.disable();
+    }
+
     if (!this.config.areSendsAllowed) {
       this.sendOptionsForm.disable();
     }

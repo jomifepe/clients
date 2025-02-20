@@ -1,7 +1,10 @@
+// FIXME: Update this file to be type safe and remove this and next line
+// @ts-strict-ignore
 import { Component, OnInit } from "@angular/core";
 
 import { ModalService } from "@bitwarden/angular/services/modal.service";
 import { OrganizationService } from "@bitwarden/common/admin-console/abstractions/organization/organization.service.abstraction";
+import { AccountService } from "@bitwarden/common/auth/abstractions/account.service";
 import { I18nService } from "@bitwarden/common/platform/abstractions/i18n.service";
 import { Utils } from "@bitwarden/common/platform/misc/utils";
 import { PasswordStrengthServiceAbstraction } from "@bitwarden/common/tools/password-strength";
@@ -15,7 +18,7 @@ import { PasswordRepromptService } from "@bitwarden/vault";
 import { CipherReportComponent } from "./cipher-report.component";
 
 type ReportScore = { label: string; badgeVariant: BadgeVariant };
-type ReportResult = CipherView & { reportValue: ReportScore };
+type ReportResult = CipherView & { score: number; reportValue: ReportScore };
 
 @Component({
   selector: "app-weak-passwords-report",
@@ -30,6 +33,7 @@ export class WeakPasswordsReportComponent extends CipherReportComponent implemen
     protected cipherService: CipherService,
     protected passwordStrengthService: PasswordStrengthServiceAbstraction,
     protected organizationService: OrganizationService,
+    protected accountService: AccountService,
     modalService: ModalService,
     passwordRepromptService: PasswordRepromptService,
     i18nService: I18nService,
@@ -40,6 +44,7 @@ export class WeakPasswordsReportComponent extends CipherReportComponent implemen
       modalService,
       passwordRepromptService,
       organizationService,
+      accountService,
       i18nService,
       syncService,
     );
@@ -100,7 +105,7 @@ export class WeakPasswordsReportComponent extends CipherReportComponent implemen
 
       if (result.score != null && result.score <= 2) {
         const scoreValue = this.scoreKey(result.score);
-        const row = { ...ciph, reportValue: scoreValue } as ReportResult;
+        const row = { ...ciph, score: result.score, reportValue: scoreValue } as ReportResult;
         this.weakPasswordCiphers.push(row);
       }
     });

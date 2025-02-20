@@ -5,7 +5,9 @@
   <ng-container bitDialogContent>
     <vault-cipher-form-generator
       [type]="params.type"
+      [uri]="uri"
       (valueGenerated)="onValueGenerated($event)"
+      disableMargin
     ></vault-cipher-form-generator>
   </ng-container>
   <ng-container bitDialogFooter>

@@ -1,4 +1,5 @@
-import { animate, group, style, transition, trigger } from "@angular/animations";
+// FIXME: Update this file to be type safe and remove this and next line
+// @ts-strict-ignore
 import { DIALOG_DATA, DialogConfig, DialogRef } from "@angular/cdk/dialog";
 import { Overlay } from "@angular/cdk/overlay";
 import { CommonModule } from "@angular/common";
@@ -14,6 +15,7 @@ import { PopupPageComponent } from "../../../../../platform/popup/layout/popup-p
 
 export interface GeneratorDialogParams {
   type: "password" | "username";
+  uri?: string;
 }
 
 export interface GeneratorDialogResult {
@@ -25,16 +27,6 @@ export enum GeneratorDialogAction {
   Selected = "selected",
   Canceled = "canceled",
 }
-
-const slideIn = trigger("slideIn", [
-  transition(":enter", [
-    style({ opacity: 0, transform: "translateY(100vh)" }),
-    group([
-      animate("0.15s linear", style({ opacity: 1 })),
-      animate("0.3s ease-out", style({ transform: "none" })),
-    ]),
-  ]),
-]);
 
 @Component({
   selector: "app-vault-generator-dialog",
@@ -48,7 +40,6 @@ const slideIn = trigger("slideIn", [
     CipherFormGeneratorComponent,
     ButtonModule,
   ],
-  animations: [slideIn],
 })
 export class VaultGeneratorDialogComponent {
   protected title = this.i18nService.t(this.isPassword ? "passwordGenerator" : "usernameGenerator");
@@ -70,11 +61,15 @@ export class VaultGeneratorDialogComponent {
    */
   protected generatedValue: string = "";
 
+  protected uri: string;
+
   constructor(
     @Inject(DIALOG_DATA) protected params: GeneratorDialogParams,
     private dialogRef: DialogRef<GeneratorDialogResult>,
     private i18nService: I18nService,
-  ) {}
+  ) {
+    this.uri = params.uri;
+  }
 
   /**
    * Close the dialog without selecting a value.

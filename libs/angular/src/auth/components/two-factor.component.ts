@@ -1,4 +1,7 @@
-import { Directive, Inject, OnDestroy, OnInit } from "@angular/core";
+// FIXME: Update this file to be type safe and remove this and next line
+// @ts-strict-ignore
+import { Directive, Inject, OnInit, OnDestroy } from "@angular/core";
+import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
 import { ActivatedRoute, NavigationExtras, Router } from "@angular/router";
 import { firstValueFrom } from "rxjs";
 import { first } from "rxjs/operators";
@@ -68,6 +71,7 @@ export class TwoFactorComponent extends CaptchaProtectedComponent implements OnI
   protected changePasswordRoute = "set-password";
   protected forcePasswordResetRoute = "update-temp-password";
   protected successRoute = "vault";
+  protected twoFactorTimeoutRoute = "authentication-timeout";
 
   get isDuoProvider(): boolean {
     return (
@@ -98,7 +102,23 @@ export class TwoFactorComponent extends CaptchaProtectedComponent implements OnI
     protected toastService: ToastService,
   ) {
     super(environmentService, i18nService, platformUtilsService, toastService);
+
     this.webAuthnSupported = this.platformUtilsService.supportsWebAuthn(win);
+
+    // Add subscription to authenticationSessionTimeout$ and navigate to twoFactorTimeoutRoute if expired
+    this.loginStrategyService.authenticationSessionTimeout$
+      .pipe(takeUntilDestroyed())
+      .subscribe(async (expired) => {
+        if (!expired) {
+          return;
+        }
+
+        try {
+          await this.router.navigate([this.twoFactorTimeoutRoute]);
+        } catch (err) {
+          this.logService.error(`Failed to navigate to ${this.twoFactorTimeoutRoute} route`, err);
+        }
+      });
   }
 
   async ngOnInit() {
@@ -138,7 +158,7 @@ export class TwoFactorComponent extends CaptchaProtectedComponent implements OnI
           this.toastService.showToast({
             variant: "error",
             title: this.i18nService.t("errorOccurred"),
-            message: error,
+            message: this.i18nService.t("webauthnCancelOrTimeout"),
           });
         },
         (info: string) => {
@@ -268,7 +288,8 @@ export class TwoFactorComponent extends CaptchaProtectedComponent implements OnI
     // Save off the OrgSsoIdentifier for use in the TDE flows
     // - TDE login decryption options component
     // - Browser SSO on extension open
-    await this.ssoLoginService.setActiveUserOrganizationSsoIdentifier(this.orgIdentifier);
+    const userId = (await firstValueFrom(this.accountService.activeAccount$))?.id;
+    await this.ssoLoginService.setActiveUserOrganizationSsoIdentifier(this.orgIdentifier, userId);
     this.loginEmailService.clearValues();
 
     // note: this flow affects both TDE & standard users

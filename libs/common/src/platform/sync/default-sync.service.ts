@@ -1,3 +1,5 @@
+// FIXME: Update this file to be type safe and remove this and next line
+// @ts-strict-ignore
 import { firstValueFrom, map } from "rxjs";
 
 import {
@@ -5,8 +7,13 @@ import {
   CollectionData,
   CollectionDetailsResponse,
 } from "@bitwarden/admin-console/common";
+import { KeyService } from "@bitwarden/key-management";
 
+// FIXME: remove `src` and fix import
+// eslint-disable-next-line no-restricted-imports
 import { UserDecryptionOptionsServiceAbstraction } from "../../../../auth/src/common/abstractions";
+// FIXME: remove `src` and fix import
+// eslint-disable-next-line no-restricted-imports
 import { LogoutReason } from "../../../../auth/src/common/types";
 import { ApiService } from "../../abstractions/api.service";
 import { InternalOrganizationServiceAbstraction } from "../../admin-console/abstractions/organization/organization.service.abstraction";
@@ -41,7 +48,6 @@ import { CipherData } from "../../vault/models/data/cipher.data";
 import { FolderData } from "../../vault/models/data/folder.data";
 import { CipherResponse } from "../../vault/models/response/cipher.response";
 import { FolderResponse } from "../../vault/models/response/folder.response";
-import { CryptoService } from "../abstractions/crypto.service";
 import { LogService } from "../abstractions/log.service";
 import { StateService } from "../abstractions/state.service";
 import { MessageSender } from "../messaging";
@@ -60,7 +66,7 @@ export class DefaultSyncService extends CoreSyncService {
     private domainSettingsService: DomainSettingsService,
     folderService: InternalFolderService,
     cipherService: CipherService,
-    private cryptoService: CryptoService,
+    private keyService: KeyService,
     collectionService: CollectionService,
     messageSender: MessageSender,
     private policyService: InternalPolicyService,
@@ -178,10 +184,10 @@ export class DefaultSyncService extends CoreSyncService {
       throw new Error("Stamp has changed");
     }
 
-    await this.cryptoService.setMasterKeyEncryptedUserKey(response.key, response.id);
-    await this.cryptoService.setPrivateKey(response.privateKey, response.id);
-    await this.cryptoService.setProviderKeys(response.providers, response.id);
-    await this.cryptoService.setOrgKeys(
+    await this.keyService.setMasterKeyEncryptedUserKey(response.key, response.id);
+    await this.keyService.setPrivateKey(response.privateKey, response.id);
+    await this.keyService.setProviderKeys(response.providers, response.id);
+    await this.keyService.setOrgKeys(
       response.organizations,
       response.providerOrganizations,
       response.id,
@@ -189,6 +195,7 @@ export class DefaultSyncService extends CoreSyncService {
     await this.avatarService.setSyncAvatarColor(response.id, response.avatarColor);
     await this.tokenService.setSecurityStamp(response.securityStamp, response.id);
     await this.accountService.setAccountEmailVerified(response.id, response.emailVerified);
+    await this.accountService.setAccountVerifyNewDeviceLogin(response.id, response.verifyDevices);
 
     await this.billingAccountProfileStateService.setHasPremium(
       response.premiumPersonally,

@@ -1,4 +1,6 @@
-import { filter, firstValueFrom, Observable, scan, startWith } from "rxjs";
+// FIXME: Update this file to be type safe and remove this and next line
+// @ts-strict-ignore
+import { filter, firstValueFrom, merge, Observable, ReplaySubject, scan, startWith } from "rxjs";
 import { pairwise } from "rxjs/operators";
 
 import { EventCollectionService } from "@bitwarden/common/abstractions/event/event-collection.service";
@@ -6,6 +8,7 @@ import { AccountInfo, AccountService } from "@bitwarden/common/auth/abstractions
 import { AuthService } from "@bitwarden/common/auth/abstractions/auth.service";
 import { UserVerificationService } from "@bitwarden/common/auth/abstractions/user-verification/user-verification.service.abstraction";
 import { AuthenticationStatus } from "@bitwarden/common/auth/enums/authentication-status";
+import { getOptionalUserId } from "@bitwarden/common/auth/services/account.service";
 import {
   AutofillOverlayVisibility,
   CardExpiryDateDelimiters,
@@ -91,6 +94,9 @@ export default class AutofillService implements AutofillServiceInterface {
    * @param tab The tab to collect page details from
    */
   collectPageDetailsFromTab$(tab: chrome.tabs.Tab): Observable<PageDetail[]> {
+    /** Replay Subject that can be utilized when `messages$` may not emit the page details. */
+    const pageDetailsFallback$ = new ReplaySubject<[]>(1);
+
     const pageDetailsFromTab$ = this.messageListener
       .messages$(COLLECT_PAGE_DETAILS_RESPONSE_COMMAND)
       .pipe(
@@ -112,13 +118,35 @@ export default class AutofillService implements AutofillServiceInterface {
         ),
       );
 
-    void BrowserApi.tabSendMessage(tab, {
-      tab: tab,
-      command: AutofillMessageCommand.collectPageDetails,
-      sender: AutofillMessageSender.collectPageDetailsFromTabObservable,
+    void BrowserApi.tabSendMessage(
+      tab,
+      {
+        tab: tab,
+        command: AutofillMessageCommand.collectPageDetails,
+        sender: AutofillMessageSender.collectPageDetailsFromTabObservable,
+      },
+      null,
+      true,
+    ).catch(() => {
+      // When `tabSendMessage` throws an error the `pageDetailsFromTab$` will not emit,
+      // fallback to an empty array
+      pageDetailsFallback$.next([]);
     });
 
-    return pageDetailsFromTab$;
+    // Fallback to empty array when:
+    // - In Safari, `tabSendMessage` doesn't throw an error for this case.
+    // - When opening the extension directly via the URL, `tabSendMessage` doesn't always respond nor throw an error in FireFox.
+    //   Adding checks for the major 3 browsers here to be safe.
+    const urlHasBrowserProtocol = [
+      "moz-extension://",
+      "chrome-extension://",
+      "safari-web-extension://",
+    ].some((protocol) => tab.url.startsWith(protocol));
+    if (!tab.url || urlHasBrowserProtocol) {
+      pageDetailsFallback$.next([]);
+    }
+
+    return merge(pageDetailsFromTab$, pageDetailsFallback$);
   }
 
   /**
@@ -130,10 +158,23 @@ export default class AutofillService implements AutofillServiceInterface {
   async loadAutofillScriptsOnInstall() {
     BrowserApi.addListener(chrome.runtime.onConnect, this.handleInjectedScriptPortConnection);
     void this.injectAutofillScriptsInAllTabs();
+
     this.autofillSettingsService.inlineMenuVisibility$
       .pipe(startWith(undefined), pairwise())
       .subscribe(([previousSetting, currentSetting]) =>
-        this.handleInlineMenuVisibilityChange(previousSetting, currentSetting),
+        this.handleInlineMenuVisibilitySettingsChange(previousSetting, currentSetting),
+      );
+
+    this.autofillSettingsService.showInlineMenuCards$
+      .pipe(startWith(undefined), pairwise())
+      .subscribe(([previousSetting, currentSetting]) =>
+        this.handleInlineMenuVisibilitySettingsChange(previousSetting, currentSetting),
+      );
+
+    this.autofillSettingsService.showInlineMenuIdentities$
+      .pipe(startWith(undefined), pairwise())
+      .subscribe(([previousSetting, currentSetting]) =>
+        this.handleInlineMenuVisibilitySettingsChange(previousSetting, currentSetting),
       );
   }
 
@@ -376,8 +417,9 @@ export default class AutofillService implements AutofillServiceInterface {
 
     let totp: string | null = null;
 
+    const activeAccount = await firstValueFrom(this.accountService.activeAccount$);
     const canAccessPremium = await firstValueFrom(
-      this.billingAccountProfileStateService.hasPremiumFromAnySource$,
+      this.billingAccountProfileStateService.hasPremiumFromAnySource$(activeAccount.id),
     );
     const defaultUriMatch = await this.getDefaultUriMatchStrategy();
 
@@ -423,9 +465,7 @@ export default class AutofillService implements AutofillServiceInterface {
 
         didAutofill = true;
         if (!options.skipLastUsed) {
-          // FIXME: Verify that this floating promise is intentional. If it is, add an explanatory comment and ensure there is proper error handling.
-          // eslint-disable-next-line @typescript-eslint/no-floating-promises
-          this.cipherService.updateLastUsedDate(options.cipher.id);
+          await this.cipherService.updateLastUsedDate(options.cipher.id, activeAccount.id);
         }
 
         // FIXME: Verify that this floating promise is intentional. If it is, add an explanatory comment and ensure there is proper error handling.
@@ -488,17 +528,29 @@ export default class AutofillService implements AutofillServiceInterface {
     autoSubmitLogin = false,
   ): Promise<string | null> {
     let cipher: CipherView;
+
+    const activeUserId = await firstValueFrom(
+      this.accountService.activeAccount$.pipe(getOptionalUserId),
+    );
+    if (activeUserId == null) {
+      return null;
+    }
+
     if (fromCommand) {
-      cipher = await this.cipherService.getNextCipherForUrl(tab.url);
+      cipher = await this.cipherService.getNextCipherForUrl(tab.url, activeUserId);
     } else {
-      const lastLaunchedCipher = await this.cipherService.getLastLaunchedForUrl(tab.url, true);
+      const lastLaunchedCipher = await this.cipherService.getLastLaunchedForUrl(
+        tab.url,
+        activeUserId,
+        true,
+      );
       if (
         lastLaunchedCipher &&
         Date.now().valueOf() - lastLaunchedCipher.localData?.lastLaunched?.valueOf() < 30000
       ) {
         cipher = lastLaunchedCipher;
       } else {
-        cipher = await this.cipherService.getLastUsedForUrl(tab.url, true);
+        cipher = await this.cipherService.getLastUsedForUrl(tab.url, activeUserId, true);
       }
     }
 
@@ -587,12 +639,19 @@ export default class AutofillService implements AutofillServiceInterface {
     let cipher: CipherView;
     let cacheKey = "";
 
+    const activeUserId = await firstValueFrom(
+      this.accountService.activeAccount$.pipe(getOptionalUserId),
+    );
+    if (activeUserId == null) {
+      return null;
+    }
+
     if (cipherType === CipherType.Card) {
       cacheKey = "cardCiphers";
-      cipher = await this.cipherService.getNextCardCipher();
+      cipher = await this.cipherService.getNextCardCipher(activeUserId);
     } else {
       cacheKey = "identityCiphers";
-      cipher = await this.cipherService.getNextIdentityCipher();
+      cipher = await this.cipherService.getNextIdentityCipher(activeUserId);
     }
 
     if (!cipher || !cacheKey || (cipher.reprompt === CipherRepromptType.Password && !fromCommand)) {
@@ -927,13 +986,16 @@ export default class AutofillService implements AutofillServiceInterface {
 
     if (options.allowTotpAutofill) {
       await Promise.all(
-        totps.map(async (t) => {
+        totps.map(async (t, i) => {
           if (Object.prototype.hasOwnProperty.call(filledFields, t.opid)) {
             return;
           }
 
           filledFields[t.opid] = t;
-          const totpValue = await this.totpService.getCode(login.totp);
+          let totpValue = await this.totpService.getCode(login.totp);
+          if (totpValue.length == totps.length) {
+            totpValue = totpValue.charAt(i);
+          }
           AutofillService.fillByOpid(fillScript, t, totpValue);
         }),
       );
@@ -1473,7 +1535,7 @@ export default class AutofillService implements AutofillServiceInterface {
       );
 
       return CreditCardAutoFillConstants.CardAttributesExtended.find((attributeName) => {
-        const fieldAttributeValue = field[attributeName];
+        const fieldAttributeValue = field[attributeName]?.toLocaleLowerCase();
 
         const fieldAttributeMatch = fieldAttributeValue?.match(dateFormatPattern);
         // break find as soon as a match is found
@@ -1584,16 +1646,6 @@ export default class AutofillService implements AutofillServiceInterface {
           fillFields.email = f;
           break;
         } else if (
-          !fillFields.address &&
-          AutofillService.isFieldMatch(
-            f[attr],
-            IdentityAutoFillConstants.AddressFieldNames,
-            IdentityAutoFillConstants.AddressFieldNameValues,
-          )
-        ) {
-          fillFields.address = f;
-          break;
-        } else if (
           !fillFields.address1 &&
           AutofillService.isFieldMatch(f[attr], IdentityAutoFillConstants.Address1FieldNames)
         ) {
@@ -1610,6 +1662,16 @@ export default class AutofillService implements AutofillServiceInterface {
           AutofillService.isFieldMatch(f[attr], IdentityAutoFillConstants.Address3FieldNames)
         ) {
           fillFields.address3 = f;
+          break;
+        } else if (
+          !fillFields.address &&
+          AutofillService.isFieldMatch(
+            f[attr],
+            IdentityAutoFillConstants.AddressFieldNames,
+            IdentityAutoFillConstants.AddressFieldNameValues,
+          )
+        ) {
+          fillFields.address = f;
           break;
         } else if (
           !fillFields.postalCode &&
@@ -1804,11 +1866,6 @@ export default class AutofillService implements AutofillServiceInterface {
         continue;
       }
 
-      if (this.shouldMakeIdentityAddressFillScript(filledFields, keywordsList)) {
-        this.makeIdentityAddressFillScript(fillScript, filledFields, field, identity);
-        continue;
-      }
-
       if (this.shouldMakeIdentityAddress1FillScript(filledFields, keywordsCombined)) {
         this.makeScriptActionWithValue(fillScript, identity.address1, field, filledFields);
         continue;
@@ -1821,6 +1878,11 @@ export default class AutofillService implements AutofillServiceInterface {
 
       if (this.shouldMakeIdentityAddress3FillScript(filledFields, keywordsCombined)) {
         this.makeScriptActionWithValue(fillScript, identity.address3, field, filledFields);
+        continue;
+      }
+
+      if (this.shouldMakeIdentityAddressFillScript(filledFields, keywordsList)) {
+        this.makeIdentityAddressFillScript(fillScript, filledFields, field, identity);
         continue;
       }
 
@@ -1869,7 +1931,10 @@ export default class AutofillService implements AutofillServiceInterface {
    */
   private excludeFieldFromIdentityFill(field: AutofillField): boolean {
     return (
-      AutofillService.isExcludedFieldType(field, AutoFillConstants.ExcludedAutofillTypes) ||
+      AutofillService.isExcludedFieldType(field, [
+        "password",
+        ...AutoFillConstants.ExcludedAutofillTypes,
+      ]) ||
       AutoFillConstants.ExcludedIdentityAutocompleteTypes.has(field.autoCompleteType) ||
       !field.viewable
     );
@@ -2874,6 +2939,12 @@ export default class AutofillService implements AutofillServiceInterface {
     ) {
       return true;
     }
+    if (
+      AutofillService.hasValue(field.dataSetValues) &&
+      this.fuzzyMatch(names, field.dataSetValues)
+    ) {
+      return true;
+    }
 
     return false;
   }
@@ -3043,29 +3114,30 @@ export default class AutofillService implements AutofillServiceInterface {
   }
 
   /**
-   * Updates the autofill inline menu visibility setting in all active tabs
-   * when the InlineMenuVisibilitySetting observable is updated.
+   * Updates the autofill inline menu visibility settings in all active tabs
+   * when the inlineMenuVisibility, showInlineMenuCards, or showInlineMenuIdentities
+   * observables are updated.
    *
-   * @param previousSetting - The previous setting value
-   * @param currentSetting - The current setting value
+   * @param oldSettingValue - The previous setting value
+   * @param newSettingValue - The current setting value
    */
-  private async handleInlineMenuVisibilityChange(
-    previousSetting: InlineMenuVisibilitySetting,
-    currentSetting: InlineMenuVisibilitySetting,
+  private async handleInlineMenuVisibilitySettingsChange(
+    oldSettingValue: InlineMenuVisibilitySetting | boolean,
+    newSettingValue: InlineMenuVisibilitySetting | boolean,
   ) {
-    if (previousSetting === undefined || previousSetting === currentSetting) {
+    if (oldSettingValue == null || oldSettingValue === newSettingValue) {
       return;
     }
 
-    const inlineMenuPreviouslyDisabled = previousSetting === AutofillOverlayVisibility.Off;
-    const inlineMenuCurrentlyDisabled = currentSetting === AutofillOverlayVisibility.Off;
-    if (!inlineMenuPreviouslyDisabled && !inlineMenuCurrentlyDisabled) {
-      const tabs = await BrowserApi.tabsQuery({});
-      tabs.forEach((tab) =>
-        BrowserApi.tabSendMessageData(tab, "updateAutofillInlineMenuVisibility", {
-          inlineMenuVisibility: currentSetting,
-        }),
-      );
+    const isInlineMenuVisibilitySubSetting =
+      typeof oldSettingValue === "boolean" || typeof newSettingValue === "boolean";
+    const inlineMenuPreviouslyDisabled = oldSettingValue === AutofillOverlayVisibility.Off;
+    const inlineMenuCurrentlyDisabled = newSettingValue === AutofillOverlayVisibility.Off;
+    if (
+      !isInlineMenuVisibilitySubSetting &&
+      !inlineMenuPreviouslyDisabled &&
+      !inlineMenuCurrentlyDisabled
+    ) {
       return;
     }
 
